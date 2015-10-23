@@ -30,9 +30,9 @@ function RNN.create(input_size, num_L, num_h, rnn_type)
 
 	-- there are 1+n inputs: x_t, prev_h[1], ..., prev_h[n]
 	local inputs = {}
-	table.insert(inputs, nn.Identity()():annotate{'x'}) -- x_t
+	table.insert(inputs, nn.Identity()():annotate{'x'})
 	for L = 1, num_L do
-		table.insert(inputs, nn.Identity()():annotate{'prev_h_'..L}) -- prev_h[L]
+		table.insert(inputs, nn.Identity()():annotate{'prev_h_'..L})
 	end
 
 	-- build the computation graph of each layer
@@ -72,15 +72,26 @@ function RNN.create(input_size, num_L, num_h, rnn_type)
 
 end
 
-model = RNN.create(1000, 2, torch.Tensor{100, 200}, 'alex')
+function RNN.test()
+-- create RNN, do a forward pass and plot the forward computation graph
 
-dummy_input = torch.rand(1000)
-dummy_prev1 = torch.rand(100)
-dummy_prev2 = torch.rand(200)
+	alex_model = RNN.create(1000, 2, torch.Tensor{100, 200}, 'alex')
+	dummy_input = torch.rand(1000)
+	dummy_prev1 = torch.rand(100)
+	dummy_prev2 = torch.rand(200)
+	y = alex_model:forward({dummy_input, dummy_prev1, dummy_prev2})
+	print('Alex Grave\'s RNN Model')
+	print(y)
+	graph.dot(alex_model.fg, 'Alex Grave\'s RNN')
 
-y = model:forward({dummy_input, dummy_prev1, dummy_prev2})
-print(y)
+	simple_model = RNN.create(1000, 2, 100)
+	dummy_input = torch.rand(1000)
+	dummy_prev  = torch.rand(100)
+	y = simple_model:forward({dummy_input, dummy_prev, dummy_prev})
+	print('Simplified RNN Model')
+	print(y)
+	graph.dot(simple_model.fg, 'Simple RNN')
 
+end
 
-
-
+return RNN
