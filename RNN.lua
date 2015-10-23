@@ -1,12 +1,13 @@
 --[[ 
-this implements two types of RNNs: 
+This implements two types of RNNs: 
 1) 'alex' -  http://arxiv.org/pdf/1308.0850v5.pdf, Page 3
 	layer 1 has access to prev_h[1] and x_t
 	layer L(>1) has access to prev_h[L], prev_h[L-1] and x_t
 2) 'simplified' - similar to https://github.com/karpathy/char-rnn/blob/master/model/RNN.lua
 	layer 1 has access to prev_h[1] and x_t
 	layer L(>1) has access to prev_h[L], prev_h[L-1]
-]]--
+batch_size >= 1 is supported by this code
+--]]
 
 require 'nngraph'
 
@@ -40,7 +41,6 @@ function RNN.create(input_size, num_L, num_h, rnn_type)
 	local x = inputs[1]
 	local input, next_h, input_size_L
 	for L = 1, num_L do
-
 		-- inputs for this layer
 		if L == 1 then
 			input = x
@@ -75,22 +75,31 @@ end
 function RNN.test()
 -- create RNN, do a forward pass and plot the forward computation graph
 
+	batch_size = 2
+
 	alex_model = RNN.create(1000, 2, torch.Tensor{100, 200}, 'alex')
-	dummy_input = torch.rand(1000)
-	dummy_prev1 = torch.rand(100)
-	dummy_prev2 = torch.rand(200)
+	dummy_input = torch.rand(batch_size, 1000)
+	dummy_prev1 = torch.rand(batch_size, 100)
+	dummy_prev2 = torch.rand(batch_size, 200)
 	y = alex_model:forward({dummy_input, dummy_prev1, dummy_prev2})
 	print('Alex Grave\'s RNN Model')
 	print(y)
 	graph.dot(alex_model.fg, 'Alex Grave\'s RNN')
 
 	simple_model = RNN.create(1000, 2, 100)
-	dummy_input = torch.rand(1000)
-	dummy_prev  = torch.rand(100)
+	dummy_input = torch.rand(batch_size, 1000)
+	dummy_prev  = torch.rand(batch_size, 100)
 	y = simple_model:forward({dummy_input, dummy_prev, dummy_prev})
 	print('Simplified RNN Model')
 	print(y)
 	graph.dot(simple_model.fg, 'Simple RNN')
+
+	model = RNN.create(1000, 1, 100)
+	dummy_input = torch.rand(batch_size, 1000)
+	dummy_prev  = torch.rand(batch_size, 100)
+	y = model:forward({dummy_input, dummy_prev})
+	print('Single Layer RNN Model')
+	graph.dot(model.fg, 'Single Layer RNN')
 
 end
 
