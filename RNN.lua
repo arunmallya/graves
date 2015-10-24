@@ -39,30 +39,34 @@ function RNN.create(input_size, num_L, num_h, rnn_type)
 	-- build the computation graph of each layer
 	local outputs = {}
 	local x = inputs[1]
-	local input, next_h, input_size_L
+	local input, next_h, input_size_L, rnn_size
 	for L = 1, num_L do
+		rnn_size = num_h[L]
+
 		-- inputs for this layer
 		if L == 1 then
+			-- layer takes x input
 			input = x
 			input_size_L = input_size
 		else
-			input = outputs[L-1]
-			input_size_L = num_h[L-1]
+			if rnn_type == 'simplified' then 
+				-- layer takes next_h[L-1] as input
+				input = outputs[L-1]
+				input_size_L = num_h[L-1]
+			elseif rnn_type == 'alex' then
+				-- layer takes x, next_h[L-1] as input
+				input = nn.JoinTable(2)({x, outputs[L-1]}) -- [x, next_h[L-1]]
+				input_size_L = num_h[L-1] + input_size
+			end
 		end
 		local prev_h = inputs[1+L]
 
 		-- matrix multiplication
-		local i2h = nn.Linear(input_size_L, num_h[L])(input):annotate{name='i2h_'..L}
-		local h2h = nn.Linear(num_h[L], num_h[L])(prev_h):annotate{name='h2h_'..L}
+		local i2h = nn.Linear(input_size_L, rnn_size)(input):annotate{name='i2h_'..L}
+		local h2h = nn.Linear(rnn_size, rnn_size)(prev_h):annotate{name='h2h_'..L}
 
-		if L == 1 or rnn_type == 'simplified' then 
-		-- layer takes input, prev_h[L] as input
-			next_h = nn.Tanh()(nn.CAddTable()({i2h, h2h})):annotate{name='next_h_'..L}
-		else
-		-- layer takes input, prev_h[L], x_t as input
-			local x2h = nn.Linear(input_size, num_h[L])(x):annotate{name='x2h_'..L}
-			next_h = nn.Tanh()(nn.CAddTable()({i2h, h2h, x2h})):annotate{name='next_h_'..L}
-		end
+		-- form the output
+		next_h = nn.Tanh()(nn.CAddTable()({i2h, h2h})):annotate{name='next_h_'..L}
 
 		table.insert(outputs, next_h)
 	end
@@ -77,30 +81,38 @@ function RNN.test()
 
 	batch_size = 2
 
-	alex_model = RNN.create(1000, 2, torch.Tensor{100, 200}, 'alex')
+	model = RNN.create(1000, 1, 100)
 	dummy_input = torch.rand(batch_size, 1000)
-	dummy_prev1 = torch.rand(batch_size, 100)
-	dummy_prev2 = torch.rand(batch_size, 200)
-	y = alex_model:forward({dummy_input, dummy_prev1, dummy_prev2})
-	print('Alex Grave\'s RNN Model')
+	dummy_prev  = torch.rand(batch_size, 100)
+	y = model:forward({dummy_input, dummy_prev})
+	print('Single Layer RNN Model')
+	print('batch_size: '..batch_size..', layers: 1')
 	print(y)
-	graph.dot(alex_model.fg, 'Alex Grave\'s RNN')
+	graph.dot(model.fg, 'Single Layer RNN')
 
 	simple_model = RNN.create(1000, 2, 100)
 	dummy_input = torch.rand(batch_size, 1000)
 	dummy_prev  = torch.rand(batch_size, 100)
 	y = simple_model:forward({dummy_input, dummy_prev, dummy_prev})
 	print('Simplified RNN Model')
+	print('batch_size: '..batch_size..', layers: 2')
 	print(y)
 	graph.dot(simple_model.fg, 'Simple RNN')
 
-	model = RNN.create(1000, 1, 100)
+	alex_model = RNN.create(1000, 2, torch.Tensor{100, 200}, 'alex')
 	dummy_input = torch.rand(batch_size, 1000)
-	dummy_prev  = torch.rand(batch_size, 100)
-	y = model:forward({dummy_input, dummy_prev})
-	print('Single Layer RNN Model')
-	graph.dot(model.fg, 'Single Layer RNN')
+	dummy_prev1 = torch.rand(batch_size, 100)
+	dummy_prev2 = torch.rand(batch_size, 200)
+	y = alex_model:forward({dummy_input, dummy_prev1, dummy_prev2})
+	print('Alex Grave\'s RNN Model')
+	print('batch_size: '..batch_size..', layers: 2')
+	print(y)
+	graph.dot(alex_model.fg, 'Alex Grave\'s RNN')
 
 end
 
 return RNN
+
+
+
+
