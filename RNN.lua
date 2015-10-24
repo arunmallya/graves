@@ -2,10 +2,11 @@
 This implements two types of RNNs: 
 1) 'alex' -  http://arxiv.org/pdf/1308.0850v5.pdf, Page 3
 	layer 1 has access to prev_h[1] and x_t
-	layer L(>1) has access to prev_h[L], prev_h[L-1] and x_t
+	layer L(>1) has access to prev_h[L], next_h[L-1] and x_t
 2) 'simplified' - similar to https://github.com/karpathy/char-rnn/blob/master/model/RNN.lua
 	layer 1 has access to prev_h[1] and x_t
-	layer L(>1) has access to prev_h[L], prev_h[L-1]
+	layer L(>1) has access to prev_h[L] and next_h[L-1]
+	
 batch_size >= 1 is supported by this code
 --]]
 

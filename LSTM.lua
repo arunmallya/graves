@@ -1,7 +1,14 @@
 --[[ 
 This implements two types of LSTMs: 
 1) 'alex' -  http://arxiv.org/pdf/1308.0850v5.pdf
+	layer 1 has access to prev_h[1] and x_t
+	layer L(>1) has access to prev_h[L], next_h[L-1] and x_t
+	layers also use prev_c[L] and next_c[L] for gate computation
 2) 'simplified' - adapted from https://github.com/karpathy/char-rnn/blob/master/model/LSTM.lua
+	layer 1 has access to prev_h[1] and x_t
+	layer L(>1) has access to prev_h[L] and next_h[L-1]
+	layers do not use c for gate computation
+	
 batch_size >= 1 is supported by this code
 --]]
 
