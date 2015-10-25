@@ -17,13 +17,14 @@ require 'nngraph'
 
 local LSTM = {}
 
-function LSTM.create(input_size, num_L, num_h, rnn_type)
+function LSTM.create(input_size, num_L, num_h, output_size, rnn_type)
 
     -- check input sanity
     rnn_type = rnn_type or 'simplified'
     assert(rnn_type == 'simplified' or rnn_type == 'alex', 
         'invalid rnn type: '..rnn_type)
     assert(input_size > 0, 'invalid input_size: should be > 0')
+    assert(output_size > 0, 'invalid output_size: should be > 0')
     assert(num_L >= 1, 'invalid num_L: should be >= 1')
     if not torch.isTensor(num_h) then 
         num_h = torch.Tensor(num_L):fill(num_h)
@@ -35,14 +36,17 @@ function LSTM.create(input_size, num_L, num_h, rnn_type)
 
     -- build the required LSTM graph
     if rnn_type == 'simplified' then
-        return LSTM.create_simplified(input_size, num_L, num_h)
+        return LSTM.create_simplified(input_size, num_L, num_h, output_size)
     elseif rnn_type == 'alex' then
-        return LSTM.create_alex(input_size, num_L, num_h)
+        return LSTM.create_alex(input_size, num_L, num_h, output_size)
     end
 
 end
 
-function LSTM.create_simplified(input_size, num_L, num_h)
+function LSTM.create_simplified(input_size, num_L, num_h, output_size)
+
+    print('Creating simple LSTM of '..num_L..' layers of size')
+    print(num_h)
 
     -- there are 1+n+n inputs: x_t, prev_h[1], ..., prev_h[n], prev_c[1], ..., prev_c[n]
     local inputs = {}
@@ -100,12 +104,21 @@ function LSTM.create_simplified(input_size, num_L, num_h)
         table.insert(outputs, next_h)
     end
 
+    -- set up the decoder
+    local top_h = outputs[#outputs]
+    local proj = nn.Linear(rnn_size, output_size)(top_h):annotate{name='decoder'}
+    local logsoft = nn.LogSoftMax()(proj)
+    table.insert(outputs, logsoft)
+
     -- create a module out of the computation graph
     return nn.gModule(inputs, outputs)
 
 end
 
-function LSTM.create_alex(input_size, num_L, num_h)
+function LSTM.create_alex(input_size, num_L, num_h, output_size)
+
+    print('Creating Alex LSTM of '..num_L..' layers of size')
+    print(num_h)
 
     -- there are 1+n+n inputs: x_t, prev_h[1], ..., prev_h[n], prev_c[1], ..., prev_c[n]
     local inputs = {}
@@ -117,10 +130,13 @@ function LSTM.create_alex(input_size, num_L, num_h)
 
     -- build the computation graph of each layer
     local outputs = {}
+    local hidden  = {}
     local x = inputs[1]
     local input, input_size_L, rnn_size
+    local num_hidden = 0
     for L = 1, num_L do
         rnn_size = num_h[L]
+        num_hidden = num_hidden + rnn_size
 
         -- inputs for this layer
         if L == 1 then
@@ -171,7 +187,14 @@ function LSTM.create_alex(input_size, num_L, num_h)
 
         table.insert(outputs, next_c)
         table.insert(outputs, next_h)
+        table.insert(hidden, next_h)
     end
+
+    -- set up the decoder
+    local top_h = nn.JoinTable(2)(hidden)
+    local proj = nn.Linear(num_hidden, output_size)(top_h):annotate{name='decoder'}
+    local logsoft = nn.LogSoftMax()(proj)
+    table.insert(outputs, logsoft)
 
     -- create a module out of the computation graph
     return nn.gModule(inputs, outputs)
@@ -180,9 +203,9 @@ end
 
 function LSTM.test()
 
-    batch_size = 1
+    batch_size = 2
 
-    model = LSTM.create(1000, 1, 100)
+    model = LSTM.create(1000, 1, 100, 500)
     dummy_input  = torch.rand(batch_size, 1000)
     dummy_prev_c = torch.rand(batch_size, 100)
     dummy_prev_h = torch.rand(batch_size, 100)
@@ -193,7 +216,7 @@ function LSTM.test()
     graph.dot(model.fg, 'Single Layer LSTM')
 
 
-    simple_model = LSTM.create(1000, 2, 100)
+    simple_model = LSTM.create(1000, 2, 100, 500)
     dummy_input  = torch.rand(batch_size, 1000)
     dummy_prev_c = torch.rand(batch_size, 100)
     dummy_prev_h = torch.rand(batch_size, 100)
@@ -203,7 +226,7 @@ function LSTM.test()
     print(y)
     graph.dot(simple_model.fg, 'Simple LSTM')
 
-    alex_model = LSTM.create(1000, 2, 100, 'alex')
+    alex_model = LSTM.create(1000, 2, 100, 500, 'alex')
     dummy_input  = torch.rand(batch_size, 1000)
     dummy_prev_c = torch.rand(batch_size, 100)
     dummy_prev_h = torch.rand(batch_size, 100)
