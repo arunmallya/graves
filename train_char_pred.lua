@@ -69,18 +69,19 @@ if not torch.isTensor(opt.rnn_size) then
 end
 assert(opt.rnn_size:size(1) == opt.num_layers, 'invalid rnn_size: need one scalar or a tensor of same length as num_layers')
 -- train / val / test split for data, in fractions
-local test_frac = math.max(0, 1 - (opt.train_frac + opt.val_frac))
+local test_frac   = math.max(0, 1 - (opt.train_frac + opt.val_frac))
 local split_sizes = {opt.train_frac, opt.val_frac, test_frac} 
 
 -- initialize cuda for training
 opt = init_cuda(opt)
--- create the data loader class
-local loader = CharSplitLMMinibatchLoader.create(opt.data_dir, opt.batch_size, opt.seq_length, split_sizes)
-vocab_size = loader.vocab_size  -- the number of distinct characters
-local vocab = loader.vocab_mapping
-print('vocab size: ' .. vocab_size)
 -- make sure output directory exists
 if not path.exists(opt.checkpoint_dir) then lfs.mkdir(opt.checkpoint_dir) end
+
+-- create the data loader class
+local loader = CharSplitLMMinibatchLoader.create(opt.data_dir, opt.batch_size, opt.seq_length, split_sizes)
+vocab_size   = loader.vocab_size  -- the number of distinct characters
+local vocab  = loader.vocab_mapping
+print('vocab size: ' .. vocab_size)
 -- create the input vector generator
 input_gen = OneHot(vocab_size)
 
