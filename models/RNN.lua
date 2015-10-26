@@ -97,8 +97,8 @@ function RNN.create(input_size, num_L, num_h, opts)
         end
     end
 
-    -- create a module out of the computation graph
-    return nn.gModule(inputs, outputs)
+    -- return the inputs and outputs of the computation graph
+    return inputs, outputs
 
 end
 
@@ -110,7 +110,8 @@ function RNN.test()
         output_size = 500
     }
 
-    model = RNN.create(1000, 1, 100)
+    inputs, outputs = RNN.create(1000, 1, 100)
+    model = nn.gModule(inputs, outputs)
     dummy_input = torch.rand(batch_size, 1000)
     dummy_prev  = torch.rand(batch_size, 100)
     y = model:forward({dummy_input, dummy_prev})
@@ -119,7 +120,8 @@ function RNN.test()
     print(y)
     graph.dot(model.fg, 'Single Layer RNN')
 
-    model = RNN.create(1000, 1, 100, opts)
+    inputs, outputs = RNN.create(1000, 1, 100, opts)
+    model = nn.gModule(inputs, outputs)
     dummy_input = torch.rand(batch_size, 1000)
     dummy_prev  = torch.rand(batch_size, 100)
     y = model:forward({dummy_input, dummy_prev})
@@ -128,7 +130,8 @@ function RNN.test()
     print(y)
     graph.dot(model.fg, 'Single Layer RNN with Decoder')
 
-    simple_model = RNN.create(1000, 2, 100, opts)
+    inputs, outputs = RNN.create(1000, 2, 100, opts)
+    simple_model = nn.gModule(inputs, outputs)
     dummy_input = torch.rand(batch_size, 1000)
     dummy_prev  = torch.rand(batch_size, 100)
     y = simple_model:forward({dummy_input, dummy_prev, dummy_prev})
@@ -138,7 +141,8 @@ function RNN.test()
     graph.dot(simple_model.fg, 'Simple RNN')
 
     opts.rnn_type = 'alex'
-    alex_model = RNN.create(1000, 2, torch.Tensor{100, 200}, opts)
+    inputs, outputs = RNN.create(1000, 2, torch.Tensor{100, 200}, opts)
+    alex_model = nn.gModule(inputs, outputs)
     dummy_input = torch.rand(batch_size, 1000)
     dummy_prev1 = torch.rand(batch_size, 100)
     dummy_prev2 = torch.rand(batch_size, 200)

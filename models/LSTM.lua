@@ -116,8 +116,8 @@ function LSTM.create_simplified(input_size, num_L, num_h, output_size)
         table.insert(outputs, logsoft)
     end
 
-    -- create a module out of the computation graph
-    return nn.gModule(inputs, outputs)
+    -- return the inputs and outputs of the computation graph
+    return inputs, outputs
 
 end
 
@@ -204,8 +204,8 @@ function LSTM.create_alex(input_size, num_L, num_h, output_size)
         table.insert(outputs, logsoft)
     end
 
-    -- create a module out of the computation graph
-    return nn.gModule(inputs, outputs)
+    -- return the inputs and outputs of the computation graph
+    return inputs, outputs
 
 end
 
@@ -216,7 +216,8 @@ function LSTM.test()
         output_size = 500
     }
 
-    model = LSTM.create(1000, 1, 100)
+    inputs, outputs = LSTM.create(1000, 1, 100)
+    model = nn.gModule(inputs, outputs)
     dummy_input  = torch.rand(batch_size, 1000)
     dummy_prev_c = torch.rand(batch_size, 100)
     dummy_prev_h = torch.rand(batch_size, 100)
@@ -226,7 +227,8 @@ function LSTM.test()
     print(y)
     graph.dot(model.fg, 'Single Layer LSTM')
 
-    model = LSTM.create(1000, 1, 100, opts)
+    inputs, outputs = LSTM.create(1000, 1, 100, opts)
+    model = nn.gModule(inputs, outputs)
     dummy_input  = torch.rand(batch_size, 1000)
     dummy_prev_c = torch.rand(batch_size, 100)
     dummy_prev_h = torch.rand(batch_size, 100)
@@ -236,7 +238,8 @@ function LSTM.test()
     print(y)
     graph.dot(model.fg, 'Single Layer LSTM with Decoder')
 
-    simple_model = LSTM.create(1000, 2, 100, opts)
+    inputs, outputs = LSTM.create(1000, 2, 100, opts)
+    simple_model = nn.gModule(inputs, outputs)
     dummy_input  = torch.rand(batch_size, 1000)
     dummy_prev_c = torch.rand(batch_size, 100)
     dummy_prev_h = torch.rand(batch_size, 100)
@@ -247,7 +250,8 @@ function LSTM.test()
     graph.dot(simple_model.fg, 'Simple LSTM')
 
     opts.rnn_type = 'alex'
-    alex_model = LSTM.create(1000, 2, 100, opts)
+    inputs, outputs = LSTM.create(1000, 2, 100, opts)
+    alex_model = nn.gModule(inputs, outputs)
     dummy_input  = torch.rand(batch_size, 1000)
     dummy_prev_c = torch.rand(batch_size, 100)
     dummy_prev_h = torch.rand(batch_size, 100)

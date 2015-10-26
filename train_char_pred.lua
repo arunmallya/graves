@@ -112,9 +112,11 @@ else
     print('\nCreating an ' .. opt.model .. ' with ' .. opt.num_layers .. ' layers')
     protos = {}
     if opt.model == 'lstm' then
-        protos.rnn = LSTM.create(vocab_size, opt.num_layers, opt.rnn_size, rnn_opts)
+        inputs, outputs = LSTM.create(vocab_size, opt.num_layers, opt.rnn_size, rnn_opts)
+        protos.rnn = nn.gModule(inputs, outputs)
     elseif opt.model == 'rnn' then
-        protos.rnn = RNN.create(vocab_size, opt.num_layers, opt.rnn_size, rnn_opts)
+        inputs, outputs = RNN.create(vocab_size, opt.num_layers, opt.rnn_size, rnn_opts)
+        protos.rnn = nn.gModule(inputs, outputs)
     end
     protos.criterion = nn.ClassNLLCriterion()
 end
