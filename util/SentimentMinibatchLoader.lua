@@ -1,7 +1,7 @@
 local SentimentMinibatchLoader = {}
 SentimentMinibatchLoader.__index = SentimentMinibatchLoader
 
-function SentimentMinibatchLoader.create(data_dir, batch_size, seq_length, split_fractions)
+function SentimentMinibatchLoader.create(data_dir, batch_size, seq_length, vocab_size, split_fractions)
     -- split_fractions is e.g. {0.9, 0.1}
 
     local self = {}
@@ -27,10 +27,10 @@ function SentimentMinibatchLoader.create(data_dir, batch_size, seq_length, split
 
     print('loading data files...')
     local data  = torch.load(tensor_file)
-    all_train_data  = data.train_data
-    all_train_label = data.train_label
-    all_test_data   = data.test_data
-    all_test_label  = data.test_label
+    local all_train_data  = data.train_data
+    local all_train_label = data.train_label
+    local all_test_data   = data.test_data
+    local all_test_label  = data.test_label
 
     -- self.batches is a table of tensors
     print('reshaping tensor...')
@@ -39,25 +39,32 @@ function SentimentMinibatchLoader.create(data_dir, batch_size, seq_length, split
 
     -- drop all examples with length greater than seq_length
     -- all maintain list of size of each example for efficient batching
-    train_data  = {}
-    train_label = {}
-    train_lens  = {}
-    index = 1
+    local train_data  = {}
+    local train_label = {}
+    local train_lens  = {}
+    local index = 1
+    local item
     for i = 1, #all_train_data do
         if all_train_data[i]:size(1) <= self.seq_length then
-            train_data[index]  = all_train_data[i]
+            item = all_train_data[i]
+            item[item:ge(vocab_size)] = 1
+            train_data[index]  = item
             train_label[index] = all_train_label[i]
             train_lens[index]  = all_train_data[i]:size(1)
             index = index + 1
         end
     end
-    test_data  = {}
-    test_label = {}
-    test_lens  = {}
-    index = 1
+
+    local test_data  = {}
+    local test_label = {}
+    local test_lens  = {}
+    local index = 1
+    local item
     for i = 1, #all_test_data do
         if all_test_data[i]:size(1) <= self.seq_length then
-            test_data[index]  = all_test_data[i]
+            item = all_test_data[i]
+            item[item:ge(vocab_size)] = 1
+            test_data[index]  = item
             test_label[index] = all_test_label[i]
             test_lens[index]  = all_test_data[i]:size(1)
             index = index + 1
@@ -72,10 +79,10 @@ function SentimentMinibatchLoader.create(data_dir, batch_size, seq_length, split
 
     -- get sorted example size ordering
     -- will use this for efficient batching and padding each batch
-    train_lens = torch.Tensor(train_lens)
-    test_lens = torch.Tensor(test_lens)
-    train_lens, train_ind = torch.sort(train_lens)
-    test_lens, test_ind  = torch.sort(test_lens)
+    local train_lens = torch.Tensor(train_lens)
+    local test_lens = torch.Tensor(test_lens)
+    local train_lens, train_ind = torch.sort(train_lens)
+    local test_lens, test_ind  = torch.sort(test_lens)
     self.train_ind  = train_ind
     self.test_ind   = test_ind
     self.train_lens = train_lens
@@ -169,6 +176,15 @@ function SentimentMinibatchLoader:next_batch(split_index)
             label[i] = self.train_label[indices[i]]
         end
     end
+
+    -- add offset of 1 to data and label
+    -- 0 --> 1 = blank
+    -- 1 --> 2 = UNK
+    -- 2, ..., n-1 --> 3, ..., n = words
+    -- thus, total vocab size = n
+    -- label: 0, 1 --> 1, 2
+    data:add(1)
+    label:add(1)
 
     return data, label
 end
