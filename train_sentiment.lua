@@ -213,8 +213,7 @@ function eval_split(split_index, max_batches)
 
         local predictions = protos.mean_pred:forward(hidden_outputs)
         loss = loss + protos.criterion:forward(predictions, y)
-        -- carry over lstm state
-        --rnn_state[0] = rnn_state[#rnn_state]
+
         print(i .. '/' .. n .. '...')
     end
 
@@ -381,7 +380,6 @@ for i = 1, iterations do
         checkpoint.val_losses = val_losses
         checkpoint.i = i
         checkpoint.epoch = epoch
-        checkpoint.vocab = loader.vocab_mapping
         torch.save(savefile, checkpoint)
     end
 
