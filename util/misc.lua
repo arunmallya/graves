@@ -56,7 +56,9 @@ end
 function prepro(opts, ...)
     local args = {...}
     for i,var in ipairs(args) do
-        var = var:transpose(1, 2):contiguous() -- swap the axes for faster indexing
+    	if var:dim() == 2 then
+        	var = var:transpose(1, 2):contiguous() -- swap the axes for faster indexing
+        end
         if opt.gpuid >= 0 and opt.opencl == 0 then -- ship the input arrays to GPU
             -- have to convert to float because integers can't be cuda()'d
             var = var:float():cuda()
