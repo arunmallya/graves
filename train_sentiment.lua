@@ -95,10 +95,8 @@ if string.len(opt.init_from) > 0 then
     protos = checkpoint.protos
     -- make sure the vocabs are the same
     local vocab_compatible = true
-    for c,i in pairs(checkpoint.vocab) do 
-        if not vocab[c] == i then 
-            vocab_compatible = false
-        end
+    if vocab_size ~= checkpoint.vocab_size then
+        vocab_compatible = false
     end
     assert(vocab_compatible, 'error, the character vocabulary for this dataset and the one in the saved checkpoint are not the same. This is trouble.')
     -- overwrite model settings based on checkpoint to ensure compatibility
@@ -191,7 +189,8 @@ function eval_split(split_index, max_batches)
     if max_batches ~= nil then n = math.min(max_batches, n) end
 
     loader:reset_batch_pointer(split_index) -- move batch iteration pointer for this split to front
-    local loss = 0
+    local num_correct = 0
+    local indices
     local rnn_state = {[0] = init_state}
     
     for i = 1,n do -- iterate over batches in the split
@@ -214,13 +213,15 @@ function eval_split(split_index, max_batches)
         end
 
         local predictions = protos.mean_pred:forward(hidden_outputs)
-        loss = loss + protos.criterion:forward(predictions, y)
+        _, indices = torch.max(predictions, 2)
+
+        num_correct = num_correct + torch.sum(torch.eq(indices, y))
 
         print(i .. '/' .. n .. '...')
     end
 
-    loss = loss / n
-    return loss
+    local accuracy = num_correct / (n * opt.batch_size)
+    return accuracy
 end
 
 -- do fwd/bwd and return loss, grad_params
@@ -308,7 +309,8 @@ end
 
 -- start optimization here
 train_losses = {}
-val_losses = {}
+val_accuracies = {}
+test_accuracies = {}
 local optim_state = {learningRate = opt.learning_rate, alpha = opt.decay_rate}
 local iterations = opt.max_epochs * loader.ntrain
 local iterations_per_epoch = loader.ntrain
@@ -345,17 +347,22 @@ for i = 1, iterations do
     -- every now and then or on last iteration
     if i % opt.eval_val_every == 0 or i == iterations then
         -- evaluate loss on validation data
-        local val_loss = eval_split(2) -- 2 = validation
-        val_losses[i] = val_loss
+        local val_accuracy = eval_split(2) -- 2 = validation
+        local test_accuracy = eval_split(3) -- 3 = test
+        val_accuracies[i] = val_accuracy
+        test_accuracies[i] = test_accuracy
 
-        local savefile = string.format('%s/lm_%s_epoch%.2f_%.4f.t7', opt.checkpoint_dir, opt.savefile, epoch, val_loss)
+        local savefile = string.format('%s/lm_%s_epoch%.2f_val%.4f_test%.4f.t7', opt.checkpoint_dir, opt.savefile, epoch, val_accuracy, test_accuracy)
         print('saving checkpoint to ' .. savefile)
         local checkpoint = {}
         checkpoint.protos = protos
         checkpoint.opt = opt
+        checkpoint.vocab_size = vocab_size
         checkpoint.train_losses = train_losses
-        checkpoint.val_loss = val_loss
-        checkpoint.val_losses = val_losses
+        checkpoint.val_accuracy = val_accuracy
+        checkpoint.val_accuracies = val_accuracies
+        checkpoint.test_accuracy = test_accuracy
+        checkpoint.test_accuracies = test_accuracies
         checkpoint.i = i
         checkpoint.epoch = epoch
         torch.save(savefile, checkpoint)
