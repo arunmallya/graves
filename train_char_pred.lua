@@ -222,7 +222,13 @@ function feval(x)
     ------------------ get minibatch -------------------
     local x, y = loader:next_batch(1)
     x,y = prepro(opt, x, y)
-    
+
+    -- prepare inputs at different time steps
+    local inputs = {}
+    for t=1,opt.seq_length do
+        inputs[t] = input_gen:forward(x[t]):clone()
+    end
+
     ------------------- forward pass -------------------
     local rnn_state = {[0] = init_state_global}
     local predictions = {}           -- softmax outputs
@@ -231,8 +237,7 @@ function feval(x)
     for t=1,opt.seq_length do
         clones.rnn[t]:training() -- make sure we are in correct mode (this is cheap, sets flag)
         
-        input_vector = input_gen:forward(x[t])
-        local lst = clones.rnn[t]:forward({input_vector, unpack(rnn_state[t-1])})
+        local lst = clones.rnn[t]:forward({inputs[t], unpack(rnn_state[t-1])})
 
         rnn_state[t] = {}
         for i=1,#init_state do table.insert(rnn_state[t], lst[i]) end -- extract the state, without output
@@ -249,8 +254,7 @@ function feval(x)
         local doutput_t = clones.criterion[t]:backward(predictions[t], y[t])
         table.insert(drnn_state[t], doutput_t)
 
-        input_vector = input_gen:forward(x[t])
-        local dlst = clones.rnn[t]:backward({input_vector, unpack(rnn_state[t-1])}, drnn_state[t])
+        local dlst = clones.rnn[t]:backward({inputs[t], unpack(rnn_state[t-1])}, drnn_state[t])
         
         drnn_state[t-1] = {}
         for k,v in pairs(dlst) do
