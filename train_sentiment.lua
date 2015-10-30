@@ -1,5 +1,7 @@
 --[[
-
+An implementation of the methods from http://deeplearning.net/tutorial/lstm.html
+The architecture is the same except that the Mean Pooling layer is replaced
+by a Sum layer. This makes for faster convergence
 ]]--
 
 require 'torch'
