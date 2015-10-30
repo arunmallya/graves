@@ -47,7 +47,7 @@ function SentimentMinibatchLoader.create(data_dir, batch_size, seq_length, vocab
     for i = 1, #all_train_data do
         if all_train_data[i]:size(1) <= self.seq_length then
             item = all_train_data[i]
-            item[item:ge(vocab_size)] = 1
+            item[torch.ge(item, vocab_size)] = 1
             train_data[index]  = item
             train_label[index] = all_train_label[i]
             train_lens[index]  = all_train_data[i]:size(1)
@@ -63,7 +63,7 @@ function SentimentMinibatchLoader.create(data_dir, batch_size, seq_length, vocab
     for i = 1, #all_test_data do
         if all_test_data[i]:size(1) <= self.seq_length then
             item = all_test_data[i]
-            item[item:ge(vocab_size)] = 1
+            item[torch.ge(item, vocab_size)] = 1
             test_data[index]  = item
             test_label[index] = all_test_label[i]
             test_lens[index]  = all_test_data[i]:size(1)
@@ -145,7 +145,8 @@ function SentimentMinibatchLoader:next_batch(split_index)
         -- return from test data
         local indices = self.test_ind[{{start_ind, end_ind}}]       
         local lens = self.test_lens[{{start_ind, end_ind}}]       
-        local max_len = torch.max(lens)
+        --local max_len = torch.max(lens)
+        local max_len = self.seq_length
         data  = torch.Tensor(self.batch_size, max_len)
         label = torch.Tensor(self.batch_size)
 
@@ -162,10 +163,10 @@ function SentimentMinibatchLoader:next_batch(split_index)
         -- return from train data 
         local indices = self.train_ind[{{start_ind, end_ind}}]       
         local lens = self.train_lens[{{start_ind, end_ind}}]       
-        local max_len = torch.max(lens)
+        --local max_len = torch.max(lens)
+        local max_len = self.seq_length
         data  = torch.Tensor(self.batch_size, max_len)
         label = torch.Tensor(self.batch_size)
-
         for i = 1, self.batch_size do
             local item = self.train_data[indices[i]]
             local pad = max_len - (#item)[1]
@@ -212,7 +213,7 @@ function SentimentMinibatchLoader.text_to_tensor(train_textfile, test_textfile, 
     -- construct a tensor with all the data
     print('putting data into tensor...')
     local train_data  = {}
-    local train_label = torch.ByteTensor(num_train)
+    local train_label = torch.Tensor(num_train)
     local i = 0  
     for line in f_train:lines('*l') do  
       i = i + 1
@@ -221,14 +222,14 @@ function SentimentMinibatchLoader.text_to_tensor(train_textfile, test_textfile, 
       for key, val in ipairs(l) do
         sample[key] = val
       end
-      sample = torch.ByteTensor(sample)
+      sample = torch.Tensor(sample)
       train_label[i] = sample[1]
       train_data[i]  = sample[{{2,sample:size(1)}}]
     end
     f_train:close()  
 
     local test_data  = {}
-    local test_label = torch.ByteTensor(num_test)
+    local test_label = torch.Tensor(num_test)
     local i = 0  
     for line in f_test:lines('*l') do  
       i = i + 1
@@ -237,7 +238,7 @@ function SentimentMinibatchLoader.text_to_tensor(train_textfile, test_textfile, 
       for key, val in ipairs(l) do
         sample[key] = val
       end
-      sample = torch.ByteTensor(sample)
+      sample = torch.Tensor(sample)
       test_label[i] = sample[1]
       test_data[i]  = sample[{{2,sample:size(1)}}]
     end
