@@ -71,9 +71,8 @@ if not torch.isTensor(opt.rnn_size) then
     opt.rnn_size = torch.Tensor(opt.num_layers):fill(opt.rnn_size)
 end
 assert(opt.rnn_size:size(1) == opt.num_layers, 'invalid rnn_size: need one scalar or a tensor of same length as num_layers')
--- train / val / test split for data, in fractions
-local test_frac   = math.max(0, 1 - (opt.train_frac + opt.val_frac))
-local split_sizes = {opt.train_frac, opt.val_frac, test_frac} 
+-- train / val split for data, in fractions
+local split_sizes = {opt.train_frac, opt.val_frac} 
 
 -- initialize cuda for training
 opt = init_cuda(opt)
