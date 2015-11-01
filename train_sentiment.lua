@@ -33,14 +33,14 @@ cmd:option('-num_layers', 1, 'number of layers in the LSTM')
 cmd:option('-model', 'lstm', 'lstm, gru or rnn')
 
 -- optimization
-cmd:option('-learning_rate', 0.0001, 'learning rate')
+cmd:option('-learning_rate', 0.0002, 'learning rate')
 cmd:option('-learning_rate_decay', 0.97, 'learning rate decay')
 cmd:option('-learning_rate_decay_after', 10, 'in number of epochs, when to start decaying the learning rate')
 cmd:option('-decay_rate', 0.95, 'decay rate for rmsprop')
 cmd:option('-dropout', 0, 'dropout for regularization, used after each RNN hidden layer. 0 = no dropout')
 cmd:option('-max_seq_length', 100, 'maximum number of timesteps to unroll for')
 cmd:option('-vocab_size', 10000, 'number of words in input')
-cmd:option('-batch_size', 16, 'number of sequences to train on in parallel')
+cmd:option('-batch_size', 10, 'number of sequences to train on in parallel')
 cmd:option('-max_epochs', 50, 'number of full passes through the training data')
 cmd:option('-grad_clip', 5, 'clip gradients at this value')
 cmd:option('-train_frac', 0.95, 'fraction of data that goes into train set')
@@ -51,7 +51,7 @@ cmd:option('-init_from', '', 'initialize network parameters from checkpoint at t
 -- bookkeeping
 cmd:option('-seed', 123, 'torch manual random number generator seed')
 cmd:option('-print_every', 1, 'how many steps/minibatches between printing out the loss')
-cmd:option('-eval_val_every', 1000, 'every how many iterations should we evaluate on validation data?')
+cmd:option('-eval_val_every', 120, 'every how many iterations should we evaluate on validation data?')
 cmd:option('-checkpoint_dir', 'cv', 'output directory where checkpoints get written')
 cmd:option('-savefile', 'lstm', 'filename to autosave the checkpont to. Will be inside checkpoint_dir/')
 cmd:option('-accurate_gpu_timing', 0, 'set this flag to 1 to get precise timings when using GPU. Might make code bit slower but reports accurate timings.')
@@ -125,6 +125,7 @@ else
     -- create the prediction layer
     local m = nn.Sequential()
     m:add(nn.CAddTable())
+    m:add(nn.Dropout(0.5))
     m:add(nn.Linear(opt.rnn_size[opt.num_layers], 2))
     m:add(nn.LogSoftMax())
     protos.mean_pred = m
@@ -186,41 +187,46 @@ clones['rnn'] = model_utils.clone_many_times(protos.rnn, opt.max_seq_length, not
 
 --------------- MODEL DRIVER ---------------
 
--- evaluate the loss over an entire split
+ -- evaluate the loss over an entire split
 function eval_split(split_index, max_batches)
     print('evaluating loss over split index ' .. split_index)
     local n = loader.split_sizes[split_index]
     if max_batches ~= nil then n = math.min(max_batches, n) end
 
     loader:reset_batch_pointer(split_index) -- move batch iteration pointer for this split to front
-    local loss = 0
+    local num_correct = 0
+    local indices
     local rnn_state = {[0] = init_state}
-    
+
     for i = 1,n do -- iterate over batches in the split
         -- fetch a batch
         local x, y = loader:next_batch(split_index)
         x,y = prepro(opt, x, y)
-        
+
         local current_seq_len = x:size(1)
         local hidden_outputs = {}
+        protos.mean_pred:evaluate()
         for t=1,current_seq_len do
             clones.rnn[t]:evaluate() -- for dropout proper functioning
             input_vector = input_gen:forward(x[t])
             local lst = clones.rnn[t]:forward({input_vector, unpack(rnn_state[t-1])})
             rnn_state[t] = {}
-            for i=1,#init_state do table.insert(rnn_state[t], lst[i]) end 
+            for i=1,#init_state do table.insert(rnn_state[t], lst[i]) end
             hidden_outputs[t] = lst[#lst]
-            hidden_outputs[t]:mul(1 / current_seq_len) 
+            -- scale inputs ?
+            --hidden_outputs[t]:mul(1 / current_seq_len) 
         end
 
         local predictions = protos.mean_pred:forward(hidden_outputs)
-        loss = loss + protos.criterion:forward(predictions, y)
+        _, indices = torch.max(predictions, 2)
+
+        num_correct = num_correct + torch.sum(torch.eq(indices, y))
 
         print(i .. '/' .. n .. '...')
     end
 
-    loss = loss / opt.seq_length / n
-    return loss
+    local accuracy = num_correct / (n * opt.batch_size)
+    return accuracy
 end
 
 -- do fwd/bwd and return loss, grad_params
@@ -234,12 +240,6 @@ function modelEval(x)
     ------------------ get minibatch -------------------
     local x, y = loader:next_batch(1)
     x,y = prepro(opt, x, y)
-    -- print(x)
-    -- print(y)
-    -- io.write("Here - 1 ")
-    -- io.flush()
-    -- answer=io.read()
-
     local current_seq_len = x:size(1)
 
     ------------------- forward pass - RNN -------------------
@@ -247,64 +247,43 @@ function modelEval(x)
     local hidden_outputs = {}
     local loss = 0
     local input_vector
+
+    -- prepare input data
+    local inputs = {}
+    for t=1,current_seq_len do
+        inputs[t] = input_gen:forward(x[t]):clone()
+    end
+
+    protos.mean_pred:training()
     for t=1,current_seq_len do
         clones.rnn[t]:training() -- make sure we are in correct mode (this is cheap, sets flag)
 
-        input_vector = input_gen:forward(x[t])
-        local lst = clones.rnn[t]:forward({input_vector, unpack(rnn_state[t-1])})
+        local lst = clones.rnn[t]:forward({inputs[t], unpack(rnn_state[t-1])})
 
         rnn_state[t] = {}
         for i=1,#init_state do table.insert(rnn_state[t], lst[i]) end -- extract the state, without output
+
         -- last element is the hidden output of rnn    
-        -- multiply it by 1/T to skip taking average in mean_pred network
         hidden_outputs[t] = lst[#lst]
-        hidden_outputs[t]:mul(1 / current_seq_len) 
     end
     
 
     ------------------- forward pass - mean_pred -------------------
-    --print(hidden_outputs)
-    -- softmax outputs
     local predictions = protos.mean_pred:forward(hidden_outputs)
-    -- print(predictions)
-    -- print(y)
-
     loss = loss + protos.criterion:forward(predictions, y)
-    -- print(loss)
-    -- io.write("Here - 3 ")
-    -- io.flush()
-    -- answer=io.read()
 
     ------------------ backward pass - mean_pred -------------------    
     local doutput  = protos.criterion:backward(predictions, y)
     local dhidouts = protos.mean_pred:backward(hidden_outputs, doutput)
-    -- scale gradients  
-    for t = 1, current_seq_len do
-        dhidouts[t]:mul(1 / current_seq_len)
-    end
-    -- print(dhidouts)
-    -- io.write("Here - 4 ")
-    -- io.flush()
-    -- answer=io.read()
 
     ------------------ backward pass - RNN -------------------
     -- initialize gradient at time t to be zeros (there's no influence from future)
     local drnn_state = {[current_seq_len] = clone_list(init_state, true)} -- true also zeros the clones
     for t=current_seq_len,1,-1 do
         -- backprop through loss, and softmax/linear
-        --local doutput_t = clones.criterion[t]:backward(predictions[t], y[t])
-        --print(drnn_state[t])
-        --print(#drnn_state[t])
-        --table.insert(drnn_state[t], dhidouts[t])
         drnn_state[t][#drnn_state[t]]:add(dhidouts[t])
 
-        -- print(drnn_state[t])
-        -- io.write("Here - 5 ")
-        -- io.flush()
-        -- answer=io.read()
-
-        input_vector = input_gen:forward(x[t])
-        local dlst = clones.rnn[t]:backward({input_vector, unpack(rnn_state[t-1])}, drnn_state[t])
+        local dlst = clones.rnn[t]:backward({inputs[t], unpack(rnn_state[t-1])}, drnn_state[t])
         
         drnn_state[t-1] = {}
         for k,v in pairs(dlst) do
@@ -323,7 +302,6 @@ function modelEval(x)
     -- this is in contrast to the char-rnn case, where there is
     -- continuity over batches
     -- init_state_global = rnn_state[#rnn_state] -- NOTE: I don't think this needs to be a clone, right?
-    
     -- grad_params:div(current_seq_len) -- this line should be here but since we use rmsprop it would have no effect. Removing for efficiency
     
     -- clip gradient element-wise
@@ -333,7 +311,8 @@ end
 
 -- start optimization here
 train_losses = {}
-val_losses = {}
+val_accuracies = {}
+test_accuracies = {}
 local optim_state = {learningRate = opt.learning_rate, alpha = opt.decay_rate}
 local iterations = opt.max_epochs * loader.ntrain
 local iterations_per_epoch = loader.ntrain
@@ -344,6 +323,7 @@ for i = 1, iterations do
     -- perform rmsprop 
     local timer = torch.Timer()
     local _, loss = optim.rmsprop(modelEval, params, optim_state)
+    --local _, loss = optim.adadelta(feval, params, optim_state)
     if opt.accurate_gpu_timing == 1 and opt.gpuid >= 0 then
         --[[
         Note on timing: The reported time can be off because the GPU is invoked async. If one
@@ -353,7 +333,7 @@ for i = 1, iterations do
         cutorch.synchronize()
     end
     local time = timer:time().real
-    
+
     local train_loss = loss[1] -- the loss is inside a list, pop it
     train_losses[i] = train_loss
 
@@ -362,38 +342,43 @@ for i = 1, iterations do
         if epoch >= opt.learning_rate_decay_after then
             local decay_factor = opt.learning_rate_decay
             optim_state.learningRate = optim_state.learningRate * decay_factor -- decay it
-            print('decayed learning rate by a factor ' .. decay_factor .. ' to ' .. optim_state.learningRate)
+            print('decayed learning rate by a factor ' .. decay_factor .. ' to ' .. optim_state.           learningRate)
         end
     end
 
     -- every now and then or on last iteration
     if i % opt.eval_val_every == 0 or i == iterations then
         -- evaluate loss on validation data
-        local val_loss = eval_split(2) -- 2 = validation
-        val_losses[i] = val_loss
+        local val_accuracy = eval_split(2) -- 2 = validation
+        local test_accuracy = eval_split(3) -- 3 = test
+        val_accuracies[i] = val_accuracy
+        test_accuracies[i] = test_accuracy
 
-        local savefile = string.format('%s/lm_%s_epoch%.2f_%.4f.t7', opt.checkpoint_dir, opt.savefile, epoch, val_loss)
+        local savefile = string.format('%s/lm_%s_epoch%.2f_val%.4f_test%.4f.t7', opt.checkpoint_dir, opt.  savefile, epoch, val_accuracy, test_accuracy)
         print('saving checkpoint to ' .. savefile)
-        local checkpoint = {}
+                local checkpoint = {}
         checkpoint.protos = protos
         checkpoint.opt = opt
+        checkpoint.vocab_size = vocab_size
         checkpoint.train_losses = train_losses
-        checkpoint.val_loss = val_loss
-        checkpoint.val_losses = val_losses
+        checkpoint.val_accuracy = val_accuracy
+        checkpoint.val_accuracies = val_accuracies
+        checkpoint.test_accuracy = test_accuracy
+        checkpoint.test_accuracies = test_accuracies
         checkpoint.i = i
         checkpoint.epoch = epoch
         torch.save(savefile, checkpoint)
     end
 
     if i % opt.print_every == 0 then
-        print(string.format("%d/%d (epoch %.3f), train_loss = %6.8f, grad/param norm = %6.4e, time/batch = %.4fs", i, iterations, epoch, train_loss, grad_params:norm() / params:norm(), time))
+        print(string.format("%d/%d (epoch %.3f), train_loss = %6.8f, grad/param norm = %6.4e, time/batch   = %.4fs", i, iterations, epoch, train_loss, grad_params:norm() / params:norm(), time))
     end
-   
+
     if i % 10 == 0 then collectgarbage() end
 
     -- handle early stopping if things are going really bad
     if loss[1] ~= loss[1] then
-        print('loss is NaN.  This usually indicates a bug.  Please check the issues page for existing issues, or create a new issue, if none exist.  Ideally, please state: your operating system, 32-bit/64-bit, your blas version, cpu/cuda/cl?')
+        print('loss is NaN.  This usually indicates a bug.  Please check the issues page for existing      issues, or create a new issue, if none exist.  Ideally, please state: your operating system, 32-bit/64-    bit, your blas version, cpu/cuda/cl?')
         break -- halt
     end
     if loss0 == nil then loss0 = loss[1] end

@@ -120,6 +120,8 @@ function SentimentMinibatchLoader:reset_batch_pointer(split_index, batch_index)
 end
 
 function SentimentMinibatchLoader:next_batch(split_index)
+    local timer = torch.Timer()
+
     if self.split_sizes[split_index] == 0 then
         -- perform a check here to make sure the user isn't screwing something up
         local split_names = {'train', 'val', 'test'}
@@ -186,6 +188,9 @@ function SentimentMinibatchLoader:next_batch(split_index)
     -- label: 0, 1 --> 1, 2
     data:add(1)
     label:add(1)
+
+    local time = timer:time().real
+    print('Batch prep time = '..time)
 
     return data, label
 end
