@@ -90,100 +90,103 @@ input_gen = OneHot(vocab_size)
 
 --------------- DEFINE THE MODEL ---------------
 
--- define the model: prototypes for one timestep, then clone them in time
-local do_random_init = true
-if string.len(opt.init_from) > 0 then
-    print('loading an LSTM from checkpoint ' .. opt.init_from)
-    local checkpoint = torch.load(opt.init_from)
-    protos = checkpoint.protos
-    -- make sure the vocabs are the same
-    local vocab_compatible = true
-    for c,i in pairs(checkpoint.vocab) do 
-        if not vocab[c] == i then 
-            vocab_compatible = false
-        end
-    end
-    assert(vocab_compatible, 'error, the character vocabulary for this dataset and the one in the saved checkpoint are not the same. This is trouble.')
-    -- overwrite model settings based on checkpoint to ensure compatibility
-    print('overwriting rnn_size=' .. checkpoint.opt.rnn_size .. ', num_layers=' .. checkpoint.opt.num_layers .. ' based on the checkpoint.')
-    opt.rnn_size = checkpoint.opt.rnn_size
-    opt.num_layers = checkpoint.opt.num_layers
-    do_random_init = false
-else
-    -- create the rnn
-    rnn_opts = {}
-    print('\nCreating an ' .. opt.model .. ' with ' .. opt.num_layers .. ' layers')
-    protos = {}
-    if opt.model == 'lstm' then
-        inputs, outputs = LSTM.create(vocab_size, opt.num_layers, opt.rnn_size, rnn_opts)
-        protos.rnn = nn.gModule(inputs, outputs)
-    elseif opt.model == 'rnn' then
-        inputs, outputs = RNN.create(vocab_size, opt.num_layers, opt.rnn_size, rnn_opts)
-        protos.rnn = nn.gModule(inputs, outputs)
-    end
-    
-    -- create the prediction layer
-    local m = nn.Sequential()
-    m:add(nn.CAddTable())
-    m:add(nn.Dropout(0.5))
-    m:add(nn.Linear(opt.rnn_size[opt.num_layers], 2))
-    m:add(nn.LogSoftMax())
-    protos.mean_pred = m
+function define_model(opt)
 
-    -- create the criterion
-    protos.criterion = nn.ClassNLLCriterion()
+    opt.do_random_init = true
+    local protos = {}
+
+    -- define the model: prototypes for one timestep, then clone them in time
+    if string.len(opt.init_from) > 0 then
+        print('loading an LSTM from checkpoint ' .. opt.init_from)
+        local checkpoint = torch.load(opt.init_from)
+        protos = checkpoint.protos
+        -- make sure the vocabs are the same
+        local vocab_compatible = true
+        for c,i in pairs(checkpoint.vocab) do 
+            if not vocab[c] == i then 
+                vocab_compatible = false
+            end
+        end
+        assert(vocab_compatible, 'error, the character vocabulary for this dataset and the one in the saved checkpoint are not the same. This is trouble.')
+        -- overwrite model settings based on checkpoint to ensure compatibility
+        print('overwriting rnn_size=' .. checkpoint.opt.rnn_size .. ', num_layers=' .. checkpoint.opt.num_layers .. ' based on the checkpoint.')
+        opt.rnn_size = checkpoint.opt.rnn_size
+        opt.num_layers = checkpoint.opt.num_layers
+        opt.do_random_init = false
+    else
+        -- create the rnn
+        rnn_opts = {}
+        print('\nCreating an ' .. opt.model .. ' with ' .. opt.num_layers .. ' layers')
+        if opt.model == 'lstm' then
+            inputs, outputs = LSTM.create(vocab_size, opt.num_layers, opt.rnn_size, rnn_opts)
+            protos.rnn = nn.gModule(inputs, outputs)
+        elseif opt.model == 'rnn' then
+            inputs, outputs = RNN.create(vocab_size, opt.num_layers, opt.rnn_size, rnn_opts)
+            protos.rnn = nn.gModule(inputs, outputs)
+        end
+        
+        -- create the prediction layer
+        local m = nn.Sequential()
+        m:add(nn.CAddTable())
+        m:add(nn.Dropout(0.5))
+        m:add(nn.Linear(opt.rnn_size[opt.num_layers], 2))
+        m:add(nn.LogSoftMax())
+        protos.mean_pred = m
+
+        -- create the criterion
+        protos.criterion = nn.ClassNLLCriterion()
+    end
+
+    return protos, opt
 end
 
 --------------- INITIALIZE THE MODEL (state & params) ---------------
 
--- the initial state of the cell/hidden states
-init_state = {}
-for L = 1, opt.num_layers do
-    local h_init = torch.zeros(opt.batch_size, opt.rnn_size[L])
-    if opt.gpuid >=0 and opt.opencl == 0 then h_init = h_init:cuda() end
-    if opt.gpuid >=0 and opt.opencl == 1 then h_init = h_init:cl() end
-    table.insert(init_state, h_init:clone())
-    if opt.model == 'lstm' then
+function init_model(opt, protos, input_gen)
+    -- the initial state of the cell/hidden states
+    init_state = {}
+    for L = 1, opt.num_layers do
+        local h_init = torch.zeros(opt.batch_size, opt.rnn_size[L])
+        if opt.gpuid >=0 and opt.opencl == 0 then h_init = h_init:cuda() end
+        if opt.gpuid >=0 and opt.opencl == 1 then h_init = h_init:cl() end
         table.insert(init_state, h_init:clone())
+        if opt.model == 'lstm' then
+            table.insert(init_state, h_init:clone())
+        end
     end
-end
 
--- ship the model to the GPU if desired
-if opt.gpuid >= 0 and opt.opencl == 0 then
-    for k,v in pairs(protos) do v:cuda() end
-    input_gen:cuda()
-end
-if opt.gpuid >= 0 and opt.opencl == 1 then
-    for k,v in pairs(protos) do v:cl() end
-    input_gen:cl()
-end
+    -- ship the model to the GPU if desired
+    if opt.gpuid >= 0 and opt.opencl == 0 then
+        for k,v in pairs(protos) do v:cuda() end
+        input_gen:cuda()
+    end
+    if opt.gpuid >= 0 and opt.opencl == 1 then
+        for k,v in pairs(protos) do v:cl() end
+        input_gen:cl()
+    end
 
--- put the above things into one flattened parameters tensor
-params, grad_params = model_utils.combine_all_parameters(protos.rnn, protos.mean_pred)
+    -- put the above things into one flattened parameters tensor
+    local params, grad_params = model_utils.combine_all_parameters(protos.rnn, protos.mean_pred)
 
--- initialization of rnn network params
-if do_random_init then
-    params:uniform(-0.08, 0.08) -- small uniform numbers
-end
--- initialize the LSTM forget gates with slightly higher biases to encourage remembering in the beginning
-if opt.model == 'lstm' then
-    for layer_idx = 1, opt.num_layers do
-        for _,node in ipairs(protos.rnn.forwardnodes) do
-            if node.data.annotations.name == 'i2h_' .. layer_idx then
-                print('setting forget gate biases to 1 in LSTM layer ' .. layer_idx)
-                -- the gates are, in order, i,f,o,g, so f is the 2nd block of weights
-                node.data.module.bias[{{opt.rnn_size[layer_idx]+1, 2*opt.rnn_size[layer_idx]}}]:fill(1.0)
+    -- initialization of rnn network params
+    if opt.do_random_init then
+        params:uniform(-0.08, 0.08) -- small uniform numbers
+    end
+    -- initialize the LSTM forget gates with slightly higher biases to encourage remembering in the beginning
+    if opt.model == 'lstm' then
+        for layer_idx = 1, opt.num_layers do
+            for _,node in ipairs(protos.rnn.forwardnodes) do
+                if node.data.annotations.name == 'i2h_' .. layer_idx then
+                    print('setting forget gate biases to 1 in LSTM layer ' .. layer_idx)
+                    -- the gates are, in order, i,f,o,g, so f is the 2nd block of weights
+                    node.data.module.bias[{{opt.rnn_size[layer_idx]+1, 2*opt.rnn_size[layer_idx]}}]:fill(1.0)
+                end
             end
         end
     end
+
+    return protos, input_gen, init_state, params, grad_params
 end
-
-print('number of parameters in the model: ' .. params:nElement())
--- make a bunch of clones of rnn after flattening, as that reallocates memory
-clones = {}
-print('cloning rnn')
-clones['rnn'] = model_utils.clone_many_times(protos.rnn, opt.max_seq_length, not protos.rnn.parameters)
-
 
 --------------- MODEL DRIVER ---------------
 
@@ -230,7 +233,6 @@ function eval_split(split_index, max_batches)
 end
 
 -- do fwd/bwd and return loss, grad_params
-local init_state_global = clone_list(init_state)
 function modelEval(x)
     if x ~= params then
         params:copy(x)
@@ -308,6 +310,23 @@ function modelEval(x)
     grad_params:clamp(-opt.grad_clip, opt.grad_clip)
     return loss, grad_params
 end
+
+--------------------------------------------
+
+-- define the model
+protos, opt = define_model(opt)
+
+print(protos)
+
+-- initialize the model
+protos, input_gen, init_state, params, grad_params = init_model(opt, protos, input_gen)
+init_state_global = clone_list(init_state)
+print('number of parameters in the model: ' .. params:nElement())
+
+-- make a bunch of clones of rnn after flattening, as that reallocates memory
+clones = {}
+print('cloning rnn')
+clones['rnn'] = model_utils.clone_many_times(protos.rnn, opt.max_seq_length, not protos.rnn.parameters)
 
 -- start optimization here
 train_losses = {}
